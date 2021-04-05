@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const catchAsync = require('../utils/catchAsync');
 const { isLoggedIn, isAuthor, validateCampground } = require('../middleware');
-
+const multer = require('multer');
+const { storage, cloudinary } = require('../cloudinary/index.js');
+const upload = multer({storage});
 const Campground = require('../models/campground');
 
 router.get('/', catchAsync(async (req, res) => {
@@ -15,13 +17,22 @@ router.get('/new', isLoggedIn, (req, res) => {
 })
 
 
-router.post('/', isLoggedIn, validateCampground, catchAsync(async (req, res, next) => {
+router.post('/', isLoggedIn, upload.single('image'), validateCampground, catchAsync(async (req, res, next) => {
     const campground = new Campground(req.body.campground);
     campground.author = req.user._id;
+    const img = {
+        url : req.file.path,
+        filename : req.file.filename
+    } 
+    campground.image = img;
     await campground.save();
     req.flash('success', 'Successfully made a new campground!');
     res.redirect(`/campgrounds/${campground._id}`)
 }))
+
+// router.post('/', upload.single('image'),(req, res)=>{
+//     console.log(req.body,req.file);
+// })
 
 router.get('/:id', catchAsync(async (req, res,) => {
     const campground = await Campground.findById(req.params.id).populate({
@@ -30,7 +41,7 @@ router.get('/:id', catchAsync(async (req, res,) => {
             path: 'author'
         }
     }).populate('author');
-    console.log(campground);
+    // console.log(campground);
     if (!campground) {
         req.flash('error', 'Cannot find that campground!');
         return res.redirect('/campgrounds');
@@ -38,7 +49,7 @@ router.get('/:id', catchAsync(async (req, res,) => {
     res.render('campgrounds/show', { campground });
 }));
 
-router.get('/:id/edit', isLoggedIn, isAuthor, catchAsync(async (req, res) => {
+router.get('/:id/edit', isLoggedIn, isAuthor, catchAsync(async (req, res, next) => {
     const { id } = req.params;
     const campground = await Campground.findById(id)
     if (!campground) {
@@ -48,16 +59,26 @@ router.get('/:id/edit', isLoggedIn, isAuthor, catchAsync(async (req, res) => {
     res.render('campgrounds/edit', { campground });
 }))
 
-router.put('/:id', isLoggedIn, isAuthor, validateCampground, catchAsync(async (req, res) => {
+router.put('/:id', isLoggedIn, isAuthor, upload.single('image'), validateCampground, catchAsync(async (req, res, next) => {
     const { id } = req.params;
     const campground = await Campground.findByIdAndUpdate(id, { ...req.body.campground });
+    if(req.file){
+        const img = {
+            url : req.file.path,
+            filename : req.file.filename
+        }
+        await cloudinary.uploader.destroy(campground.image.filename)
+        campground.image = img;
+    }
+    await campground.save();
     req.flash('success', 'Successfully updated campground!');
     res.redirect(`/campgrounds/${campground._id}`)
 }));
 
 router.delete('/:id', isLoggedIn, isAuthor, catchAsync(async (req, res) => {
     const { id } = req.params;
-    await Campground.findByIdAndDelete(id);
+    const campground = await Campground.findByIdAndDelete(id);
+    await cloudinary.uploader.destroy(campground.image.filename)
     req.flash('success', 'Successfully deleted campground')
     res.redirect('/campgrounds');
 }));
